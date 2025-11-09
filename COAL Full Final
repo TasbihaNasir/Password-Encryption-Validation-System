@@ -1,0 +1,343 @@
+INCLUDE Irvine32.inc
+
+KEY = 239
+BUFMAX = 128
+
+.data
+sEncrypt BYTE "Cipher text: ", 0
+sDecrypt BYTE "Decrypted: ", 0
+buffer BYTE BUFMAX+1 DUP(0)
+bufSize DWORD ?
+token byte ",",0
+
+promptMessage BYTE "Enter your password: ", 0
+errorMessageUpper BYTE "Password must have at least one uppercase letter.", 0
+errorMessageLower BYTE "Password must have at least one lowercase letter.", 0
+errorMessageDigit BYTE "Password must have at least one digit.", 0
+password BYTE 20 DUP(0)   ; Buffer for the password (max 20 characters)
+
+tempLower BYTE 0           ; Flag for lowercase letter
+tempUpper BYTE 0           ; Flag for uppercase letter
+tempDigit BYTE 0           ; Flag for digit
+
+validMessage BYTE "The password is valid. ", 0
+msgLengthError BYTE "Password must be at least 8 characters long.", 0
+
+; File handling variables
+filename BYTE "coal1.txt", 0
+errorFileMsg BYTE "Error in file operation.", 0
+fileHandle DWORD ?
+tempBuffer BYTE 100 DUP(0) ; Buffer for file reading
+bytesWritten DWORD ?
+
+.code
+main PROC
+    call ValidatePassword  
+
+    ; Write original password to file
+    CALL WriteOriginalToFile
+
+    ; Encrypt the password
+    CALL encryption
+
+    ; Write encrypted password to file
+    CALL WriteEncryptedToFile
+    mov eax,0
+    mov token,al;
+    ;call writetofileAppend
+    ; Display encrypted text
+    MOV EDX, OFFSET sEncrypt
+    CALL Crlf
+    CALL DisplayMessage
+
+    ; Decrypt the password
+    CALL decryption
+    ;call writetofileAppend
+
+    ; Display decrypted text
+    MOV EDX, OFFSET sDecrypt
+    CALL DisplayMessage
+
+    ; Read and display file contents
+    CALL MyReadFromFile
+
+    exit
+main ENDP
+
+; Procedure for password validation
+ValidatePassword PROC
+password_loop:
+    ; Reset all flags
+    MOV BYTE PTR[tempLower], 0  
+    MOV BYTE PTR[tempUpper], 0  
+    MOV BYTE PTR[tempDigit], 0  
+
+    ; Prompt user for password
+    MOV EDX, OFFSET promptMessage
+    CALL WriteString
+    MOV EDX, OFFSET password
+    MOV ECX, 20
+    CALL ReadString
+
+    CMP EAX, 8
+    JL notvalidlength
+
+    ; Check password characters
+    LEA ESI, password
+check_password:
+    MOV AL, [ESI]
+    CMP AL, 0
+    JE done_checking
+
+    CMP AL, 'A'
+    JL not_upper_case
+    CMP AL, 'Z'
+    JG not_upper_case
+    MOV BYTE PTR[tempUpper], 1
+not_upper_case:
+
+    CMP AL, 'a'
+    JL not_lower_case
+    CMP AL, 'z'
+    JG not_lower_case
+    MOV BYTE PTR[tempLower], 1
+not_lower_case:
+
+    CMP AL, '0'
+    JL not_digit
+    CMP AL, '9'
+    JG not_digit
+    MOV BYTE PTR[tempDigit], 1
+not_digit:
+
+    INC ESI
+    JMP check_password
+
+done_checking:
+    MOV AL, [tempUpper]
+    CMP AL, 0
+    JE missing_upper
+    MOV AL, [tempLower]
+    CMP AL, 0
+    JE missing_lower
+    MOV AL, [tempDigit]
+    CMP AL, 0
+    JE missing_digit
+
+    MOV EDX, OFFSET validMessage
+    CALL Crlf
+    CALL WriteString
+    CALL Crlf
+    RET
+
+missing_upper:
+    MOV EDX, OFFSET errorMessageUpper
+    CALL WriteString
+    CALL Crlf
+    JMP password_loop
+
+missing_lower:
+    MOV EDX, OFFSET errorMessageLower
+    CALL WriteString
+    CALL Crlf
+    JMP password_loop
+
+missing_digit:
+    MOV EDX, OFFSET errorMessageDigit
+    CALL WriteString
+    CALL Crlf
+    JMP password_loop
+
+notvalidlength:
+    MOV EDX, OFFSET msgLengthError
+    CALL WriteString
+    CALL Crlf
+    JMP password_loop
+ValidatePassword ENDP
+
+; Encryption procedure
+encryption PROC
+    PUSHAD
+    MOV ECX, 20
+    MOV ESI, OFFSET password
+
+L1:
+    MOV AL, [ESI]
+    CMP AL, 0
+    JE DoneEncrypt
+    XOR AL, KEY
+    ROL AL, 5
+    MOV [ESI], AL
+    INC ESI
+    LOOP L1
+
+DoneEncrypt:
+    POPAD
+    RET
+encryption ENDP
+
+; Decryption procedure
+; Decryption procedure
+decryption PROC
+    PUSHAD
+    MOV ECX, 20
+    MOV ESI, OFFSET password
+
+L2:
+    MOV AL, [ESI]
+    CMP AL, 0                 ; Stop if null terminator is reached
+    JE DoneDecrypt
+    ROR AL, 5
+    XOR AL, KEY
+    MOV [ESI], AL
+    INC ESI
+    LOOP L2
+
+DoneDecrypt:
+    POPAD
+    RET
+decryption ENDP
+
+; Display message procedure
+DisplayMessage PROC
+    PUSHAD
+    CALL WriteString
+    MOV EDX, OFFSET password
+    CALL WriteString
+    CALL Crlf
+    CALL Crlf
+    POPAD
+    RET
+DisplayMessage ENDP
+
+; File writing procedure with append
+; Procedure to write original password to file
+; Procedure to write original password to file
+WriteOriginalToFile PROC
+    PUSHAD
+    ; Open or create the file for writing
+    mov edx, OFFSET filename    ; filename is still "coal1.txt"
+    call CreateOutputFile       ; Opens the file for writing or creates it if it doesn't exist
+    
+    ; Check if file was created successfully
+    cmp eax, INVALID_HANDLE_VALUE
+    je FileError
+
+    ; Write the original password to the file
+    mov edx, OFFSET password    ; Address of the data to write
+    mov ecx, 20                 ; Number of bytes to write
+    call WriteToFile
+    
+    ; Write a comma separator
+    mov edx, OFFSET token       ; Comma separator
+    mov ecx, 1                  ; Write 1 byte
+    call WriteToFile
+
+    ; Close the file
+    call CloseFile
+    jmp ProcEnd
+
+FileError:
+    ; Handle file open/create error
+    mov edx, OFFSET errorFileMsg
+    call WriteString
+    call Crlf
+
+ProcEnd:
+    POPAD
+    RET
+WriteOriginalToFile ENDP
+
+; Procedure to write encrypted password to file
+WriteEncryptedToFile PROC
+    PUSHAD
+    ; Modify filename to coal2.txt
+    mov BYTE PTR [filename], 'c'
+    mov BYTE PTR [filename+1], 'o'
+    mov BYTE PTR [filename+2], 'a'
+    mov BYTE PTR [filename+3], 'l'
+    mov BYTE PTR [filename+4], '2'
+    mov BYTE PTR [filename+5], '.'
+    mov BYTE PTR [filename+6], 't'
+    mov BYTE PTR [filename+7], 'x'
+    mov BYTE PTR [filename+8], 't'
+    mov BYTE PTR [filename+9], 0
+
+    ; Append to the existing file
+    mov edx, OFFSET filename
+    call CreateOutputFile       ; This will open the existing file for appending
+    
+    ; Check if file was opened successfully
+    cmp eax, INVALID_HANDLE_VALUE
+    je FileError
+
+    ; Write the encrypted password to the file
+    mov edx, OFFSET password    ; Address of the encrypted data to write
+    mov ecx, 20                 ; Number of bytes to write
+    call WriteToFile
+    
+    ; Write a comma separator
+    mov edx, OFFSET token       ; Comma separator
+    mov ecx, 1                  ; Write 1 byte
+    call WriteToFile
+
+    ; Close the file
+    call CloseFile
+    jmp ProcEnd
+
+FileError:
+    ; Handle file open error
+    mov edx, OFFSET errorFileMsg
+    call WriteString
+    call Crlf
+
+ProcEnd:
+    POPAD
+    RET
+WriteEncryptedToFile ENDP; File reading procedure
+MyReadFromFile PROC
+    PUSHAD
+
+    ; Open the file for reading
+    mov edx, OFFSET filename
+    call OpenInputFile          ; Opens the file for reading
+    jc FileReadError            ; Jump if the file doesn't exist
+
+    ; Read file content
+    mov edx, OFFSET tempBuffer  ; Buffer to store data
+    mov ecx, 100                ; Maximum number of bytes to read
+    call ReadFromFile
+
+    ; Find the null terminator and trim the buffer
+    LEA ESI, tempBuffer
+    find_null:
+        MOV AL, [ESI]
+        CMP AL, 0
+        JE NullFound            ; If we find null, terminate the string here
+        INC ESI
+        JMP find_null
+
+    NullFound:
+        MOV BYTE PTR [ESI], 0    ; Replace null byte with actual null terminator
+
+    ; Display file content (if you still want to display it)
+    mov edx, OFFSET tempBuffer
+    call WriteString
+    call Crlf
+
+    ; Close the file
+    call CloseFile
+    jmp FileReadDone
+
+FileReadError:
+    ; Display an error message
+    mov edx, OFFSET errorFileMsg
+    call WriteString
+    call Crlf
+
+FileReadDone:
+    POPAD
+    RET
+MyReadFromFile ENDP
+
+END main
